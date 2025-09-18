@@ -11,7 +11,11 @@ library(corrr)
 library(car)
 
 #load in the dataset that was prepared in 5_prepare_all_vars.ipynb
-df <- read.csv("~/Waste_research/df_new.csv")
+df <- read.csv("waste_research_model_R\\df_new.csv")
+
+"""
+remember to update INDimp_likert, INDimp_percent, INDimp_percent_strict
+"""
 
 #select relevant variables and drop NAs
 df_model <- df %>%
@@ -19,7 +23,8 @@ df_model <- df %>%
          "GDPpc_log", "POPden_log", "URB", "EDU", "gov_right1",
          "EPS", "INDimp", "INDrec", "INDred",
          "GENpac", "RECpac", "RECpac_percent",
-         "GENplas", "RECplas", "RECplas_percent")
+         "GENplas", "RECplas", "RECplas_percent",
+         "GENmun", "RECmun", "MRECmun")
 
 df_model <- na.omit(df_model)
 
@@ -177,9 +182,11 @@ corr_1 <- df_model  %>%
 
 print(corr_1)
 
+#note: high collinearity between time_trend and time_trend2 will not be a problem.
+
 #check VIF for multicollinearity again
 vif_model_1 <- lm(RECpac ~ INDrec + INDred  + INDimp + EPS +
-                    time_trend + time_trend2 +
+                    time_trend +
                     GDPpc_log + POPden_log +
                     URB + EDU + gov_right1, data = df_model)
 vif(vif_model_1)
@@ -211,7 +218,7 @@ coeftest(fe_GENpac_trend,
 re_GENpac_trend <- plm(GENpac ~ INDrec + INDred + INDimp + EPS +
                           GDPpc_log + POPden_log +
                           URB + EDU + gov_right1 +
-                          time_trend + time_trend2,
+                          time_trend,
                         data = df_model, model = "random")
 summary(re_GENpac_trend)
 
@@ -283,7 +290,7 @@ pcdtest(fe_RECpac_percent_trend, test = "cd")
 plmtest(fe_RECpac_percent_trend, type = "bp")
 
 coeftest(fe_RECpac_percent_trend,
-         vcov = vcovHC(fe_RECpac_percent_trend, type = "sss"))
+         vcov = vcovHC(fe_RECpac_percent_trend, type = "HC3"))
 
 #RE for RECpac_percent with time trend
 re_RECpac_percent_trend <- plm(RECpac ~ INDrec + INDred + INDimp + EPS +
@@ -294,7 +301,7 @@ re_RECpac_percent_trend <- plm(RECpac ~ INDrec + INDred + INDimp + EPS +
 summary(re_RECpac_percent_trend)
 
 coeftest(re_RECpac_percent_trend,
-         vcov = vcovHC(re_RECpac_percent_trend, type = "sss"))
+         vcov = vcovHC(re_RECpac_percent_trend, type = "HC3"))
 
 #Hausman test
 phtest(fe_RECpac_percent_trend, re_RECpac_percent_trend)
@@ -444,3 +451,112 @@ coeftest(re_RECplas_percent_trend,
 phtest(fe_RECplas_percent_trend, re_RECplas_percent_trend)
 
 
+
+#--------------municiplal waste models --------------------------------
+"""
+municipal waste recycling percent may not be a good variable to look at:
+packaging is only a fraction of municipal waste, other types include 
+food waste, E-waste, garden waste, trees, 
+many of which are not possible to material recycle.
+For example, if food waste, garden waste, and tree waste increase, 
+GENmun will increase, and because these waste types are not material recycled,
+MRECmun will decrease, cancel out the increase in packaging waste...
+"""
+
+#FE model for generated municipal waste
+fe_GENmun <- plm(GENmun ~ INDrec + INDred + INDimp + EPS +
+                    GDPpc_log + POPden_log +
+                    URB + EDU + gov_right1,
+                  data = df_model, model = "within", effect = "twoways")
+
+summary(fe_GENmun)
+
+#Wooldridge serial correlation test
+pwartest(fe_GENmun)
+#Pesaran CD test for cross-sectional dependence
+pcdtest(fe_GENmun, test = "cd")
+#Breusch and Pagan test for heteroskedasticity
+plmtest(fe_GENmun, type = "bp")
+#robust SEs (cluster by country)
+coeftest(fe_GENmun, vcov = vcovHC(fe_GENmun, type = "sss"))
+
+#RE model for generated municipal waste
+re_GENmun <- plm(GENmun ~ INDrec + INDred + INDimp + EPS + 
+                    GDPpc_log + POPden_log +
+                    URB + EDU + gov_right1,
+                  data = df_model, model = "random")
+
+summary(re_GENmun)
+coeftest(re_GENmun, vcov = vcovHC(re_GENmun, type = "sss"))
+#Hausman test
+phtest(fe_GENmun, re_GENmun)
+
+
+#FE model for recycling percentage of municipal waste
+
+#create a column for recycling percentage of municipal waste
+df_model <- df_model %>% mutate(
+  RECmun_percent = RECmun / GENmun * 100
+)
+
+fe_RECmun_percent <- plm(RECmun_percent ~ INDrec + INDred + INDimp + EPS +
+                            GDPpc_log + POPden_log +
+                            URB + EDU + gov_right1,
+                         data = df_model, model = "within", effect = "twoways")
+
+summary(fe_RECmun_percent)
+
+#Wooldridge serial correlation test
+pwartest(fe_RECmun_percent)
+#Pesaran CD test for cross-sectional dependence
+pcdtest(fe_RECmun_percent, test = "cd")
+#Lagrange Multiplier (Breusch and Pagan) test for heteroskedasticity
+plmtest(fe_RECmun_percent, type = "bp")
+coeftest(fe_RECmun_percent, vcov = vcovHC(fe_RECmun_percent,
+                                          type = "HC3", cluster = "group"))
+
+#RE for MRECmun_percent
+re_RECmun_percent <- plm(RECmun_percent ~ INDrec + INDred + INDimp + EPS +
+                           GDPpc_log + POPden_log +
+                           URB + EDU + gov_right1,
+                         data = df_model, model = "random")
+
+summary(re_RECmun_percent)
+
+coeftest(re_RECmun_percent, vcov = vcovHC(re_RECmun_percent, 
+                                          type = "HC3", cluster = "group"))
+
+#Hausman test
+phtest(fe_RECmun_percent, re_RECmun_percent)
+
+#FE for MRECmun_percent
+
+df_model <- df_model %>% mutate(
+    MRECmun_percent = MRECmun/GENmun * 100)
+
+fe_MRECmun_percent <- plm(MRECmun_percent ~ INDrec + INDred + INDimp + EPS +
+                            GDPpc_log + POPden_log +
+                            URB + EDU + gov_right1,
+                         data = df_model, model = "within", effect = "twoways")
+
+summary(fe_MRECmun_percent)
+#Wooldridge serial correlation test
+pwartest(fe_MRECmun_percent)
+#Pesaran CD test for cross-sectional dependence
+pcdtest(fe_MRECmun_percent, test = "cd")
+#Lagrange Multiplier (Breusch and Pagan) test for heteroskedasticity
+plmtest(fe_MRECmun_percent, type = "bp")
+coeftest(fe_MRECmun_percent, vcov = vcovHC(fe_MRECmun_percent,
+                                           type = "sss"))
+
+#RE for MRECmun_percent
+re_MRECmun_percent <- plm(MRECmun_percent ~ INDrec + INDred + INDimp + EPS +
+                           GDPpc_log + POPden_log +
+                           URB + EDU + gov_right1,
+                         data = df_model, model = "random")
+
+summary(re_MRECmun_percent)
+coeftest(re_MRECmun_percent, vcov = vcovHC(re_MRECmun_percent,
+                                           type = "HC3", cluster = "group"))
+#hausman test
+phtest(fe_MRECmun_percent, re_MRECmun_percent)
